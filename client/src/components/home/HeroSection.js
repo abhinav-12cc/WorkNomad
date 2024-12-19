@@ -49,22 +49,44 @@ const HeroSection = () => {
                 Discover coworking spaces, coliving options, and more across India.
                 Work from anywhere, live everywhere.
               </Typography>
-              <motion.div whileHover={{ scale: 1.05 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  onClick={() => navigate('/properties')}
-                  sx={{
-                    px: 4,
-                    py: 1.5,
-                    fontSize: '1.1rem',
-                    borderRadius: '30px',
-                  }}
-                >
-                  Explore Spaces
-                </Button>
-              </motion.div>
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <motion.div whileHover={{ scale: 1.05 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    onClick={() => navigate('/register?type=developer')}
+                    sx={{
+                      px: 4,
+                      py: 1.5,
+                      fontSize: '1.1rem',
+                      borderRadius: '30px',
+                    }}
+                  >
+                    Join as Developer
+                  </Button>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }}>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    size="large"
+                    onClick={() => navigate('/register?type=owner')}
+                    sx={{
+                      px: 4,
+                      py: 1.5,
+                      fontSize: '1.1rem',
+                      borderRadius: '30px',
+                      borderWidth: '2px',
+                      '&:hover': {
+                        borderWidth: '2px',
+                      },
+                    }}
+                  >
+                    List Your Property
+                  </Button>
+                </motion.div>
+              </Box>
             </motion.div>
           </Grid>
         </Grid>

@@ -1,22 +1,58 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
 const Property = require('../models/Property');
 const Review = require('../models/Review');
 const Booking = require('../models/Booking');
+const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { isPropertyOwner } = require('../middleware/propertyOwner');
+
+// Configure multer for image upload
+const storage = multer.diskStorage({
+  destination: async function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/properties');
+    try {
+      await fs.mkdir(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    } catch (error) {
+      cb(error, null);
+    }
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB
+  },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      const error = new Error('Only .jpeg, .jpg and .png format allowed!');
+      error.code = 'INVALID_FILE_TYPE';
+      return cb(error, false);
+    }
+    cb(null, true);
+  }
+});
+
+// Serve static files from uploads directory
+router.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Get all properties with filters
 router.get('/', async (req, res) => {
   try {
     const {
       type,
-      priceMin,
-      priceMax,
-      amenities,
       location,
-      startDate,
-      endDate,
+      amenities,
       page = 1,
       limit = 12,
     } = req.query;
@@ -24,211 +60,190 @@ router.get('/', async (req, res) => {
     const query = {};
 
     if (type) {
-      query.type = { $in: type.split(',') };
-    }
-
-    if (priceMin || priceMax) {
-      query['pricing.basePrice'] = {};
-      if (priceMin) query['pricing.basePrice'].$gte = Number(priceMin);
-      if (priceMax) query['pricing.basePrice'].$lte = Number(priceMax);
-    }
-
-    if (amenities) {
-      query.amenities = { $all: amenities.split(',') };
+      query.type = type;
     }
 
     if (location) {
       query['location.address'] = { $regex: location, $options: 'i' };
     }
 
-    // Check availability if dates are provided
-    if (startDate && endDate) {
-      query['availability.blockedDates'] = {
-        $not: {
-          $elemMatch: {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate),
-          },
-        },
-      };
+    if (amenities) {
+      query.amenities = { $all: amenities.split(',') };
     }
 
     const skip = (page - 1) * limit;
+    const properties = await Property.find(query)
+      .skip(skip)
+      .limit(Number(limit))
+      .populate('owner', 'name email')
+      .sort({ createdAt: -1 });
 
-    const [properties, total] = await Promise.all([
-      Property.find(query)
-        .skip(skip)
-        .limit(Number(limit))
-        .populate('owner', 'name avatar')
-        .lean(),
-      Property.countDocuments(query),
-    ]);
-
-    // Get review stats for each property
-    const propertiesWithStats = await Promise.all(
-      properties.map(async (property) => {
-        const stats = await Review.getPropertyStats(property._id);
-        return {
-          ...property,
-          stats,
-        };
-      })
-    );
+    const total = await Property.countDocuments(query);
 
     res.json({
-      properties: propertiesWithStats,
+      properties,
       total,
       currentPage: Number(page),
       totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch properties' });
+    console.error('Error fetching properties:', error);
+    res.status(500).json({ error: 'Error fetching properties' });
   }
 });
 
-// Get property details
+// Get owner's properties
+router.get('/owner', auth, async (req, res) => {
+  try {
+    const properties = await Property.find({ owner: req.user._id })
+      .populate('owner', 'name email')
+      .sort({ createdAt: -1 });
+    res.json(properties);
+  } catch (error) {
+    console.error('Error fetching owner properties:', error);
+    res.status(500).json({ error: 'Error fetching owner properties' });
+  }
+});
+
+// Get single property
 router.get('/:id', async (req, res) => {
   try {
     const property = await Property.findById(req.params.id)
-      .populate('owner', 'name avatar email phone')
+      .populate('owner', 'name email')
       .lean();
 
     if (!property) {
       return res.status(404).json({ error: 'Property not found' });
     }
 
-    res.json(property);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch property details' });
-  }
-});
-
-// Get property stats
-router.get('/:id/stats', async (req, res) => {
-  try {
-    const [reviewStats, bookingStats] = await Promise.all([
-      Review.getPropertyStats(req.params.id),
-      Booking.aggregate([
-        {
-          $match: {
-            property: req.params.id,
-            status: { $in: ['completed', 'confirmed'] },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalBookings: { $sum: 1 },
-            totalRevenue: { $sum: '$totalAmount' },
-            occupiedDays: {
-              $sum: {
-                $divide: [
-                  {
-                    $subtract: ['$checkOut', '$checkIn'],
-                  },
-                  1000 * 60 * 60 * 24,
-                ],
-              },
-            },
-          },
-        },
-      ]),
-    ]);
-
-    const stats = {
-      ...reviewStats,
-      totalBookings: bookingStats[0]?.totalBookings || 0,
-      totalRevenue: bookingStats[0]?.totalRevenue || 0,
-      occupancyRate:
-        bookingStats[0]?.occupiedDays
-          ? (bookingStats[0].occupiedDays / 365) * 100
-          : 0,
-    };
-
-    res.json(stats);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch property stats' });
-  }
-});
-
-// Create property
-router.post('/', auth, async (req, res) => {
-  try {
-    const property = new Property({
-      ...req.body,
-      owner: req.user._id,
-    });
-
-    await property.save();
-    res.status(201).json(property);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create property' });
-  }
-});
-
-// Update property
-router.patch('/:id', auth, isPropertyOwner, async (req, res) => {
-  try {
-    const updates = Object.keys(req.body);
-    const allowedUpdates = [
-      'name',
-      'description',
-      'type',
-      'amenities',
-      'pricing',
-      'location',
-      'images',
-      'availability',
-    ];
-
-    const isValidOperation = updates.every((update) =>
-      allowedUpdates.includes(update)
-    );
-
-    if (!isValidOperation) {
-      return res.status(400).json({ error: 'Invalid updates' });
+    // Add full URLs for images
+    if (property.images) {
+      property.images = property.images.map(image => 
+        image.startsWith('http') ? image : `${process.env.API_URL || 'http://localhost:5003'}${image}`
+      );
     }
 
-    const property = await Property.findById(req.params.id);
-    updates.forEach((update) => (property[update] = req.body[update]));
+    res.json({
+      success: true,
+      data: property
+    });
+  } catch (error) {
+    console.error('Error fetching property:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error fetching property details' 
+    });
+  }
+});
+
+// Create a new property
+router.post('/', auth, upload.array('images', 5), async (req, res) => {
+  try {
+    const propertyData = {
+      ...req.body,
+      owner: req.user.userId,
+      images: req.files ? req.files.map(file => `/uploads/properties/${file.filename}`) : []
+    };
+
+    const property = new Property(propertyData);
     await property.save();
 
-    res.json(property);
+    // Update owner's property count
+    await User.findByIdAndUpdate(req.user.userId, { $inc: { propertyCount: 1 } });
+
+    res.status(201).json(property);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update property' });
+    console.error('Create property error:', error);
+    res.status(400).json({ error: error.message });
   }
 });
 
-// Delete property
+// Update a property
+router.put('/:id', auth, isPropertyOwner, upload.array('images', 5), async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    // Update fields
+    const updates = { ...req.body };
+    if (updates.amenities) {
+      updates.amenities = JSON.parse(updates.amenities);
+    }
+    if (req.files && req.files.length > 0) {
+      updates.images = [...property.images, ...req.files.map(file => `/uploads/properties/${file.filename}`)];
+    }
+
+    const updatedProperty = await Property.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true }
+    ).populate('owner', 'name email');
+
+    res.json(updatedProperty);
+  } catch (error) {
+    console.error('Error updating property:', error);
+    res.status(500).json({ error: 'Error updating property' });
+  }
+});
+
+// Delete a property
 router.delete('/:id', auth, isPropertyOwner, async (req, res) => {
   try {
-    await Property.findByIdAndDelete(req.params.id);
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    // Delete property images
+    if (property.images && property.images.length > 0) {
+      for (const image of property.images) {
+        const imagePath = path.join(__dirname, '..', image);
+        try {
+          await fs.unlink(imagePath);
+        } catch (err) {
+          console.error('Error deleting image:', err);
+        }
+      }
+    }
+
+    await property.remove();
+
+    // Update owner's property count
+    await User.findByIdAndUpdate(property.owner, { $inc: { propertyCount: -1 } });
+
     res.json({ message: 'Property deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete property' });
+    console.error('Delete property error:', error);
+    res.status(500).json({ error: 'Error deleting property' });
   }
 });
 
-// Get user properties
-router.get('/user/properties', auth, async (req, res) => {
+// Add a review
+router.post('/:id/reviews', auth, async (req, res) => {
   try {
-    const properties = await Property.find({ owner: req.user._id })
-      .populate('owner', 'name avatar')
-      .lean();
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
 
-    const propertiesWithStats = await Promise.all(
-      properties.map(async (property) => {
-        const stats = await Review.getPropertyStats(property._id);
-        return {
-          ...property,
-          stats,
-        };
-      })
-    );
+    const review = new Review({
+      property: property._id,
+      user: req.user.userId,
+      rating: req.body.rating,
+      comment: req.body.comment
+    });
 
-    res.json(propertiesWithStats);
+    await review.save();
+
+    // Update property owner's review count
+    await User.findByIdAndUpdate(property.owner, { $inc: { likesCount: 1 } });
+
+    res.status(201).json(review);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch user properties' });
+    console.error('Add review error:', error);
+    res.status(400).json({ error: error.message });
   }
 });
 

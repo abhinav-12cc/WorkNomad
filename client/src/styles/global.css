@@ -1,0 +1,93 @@
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100vh;
+  scroll-behavior: smooth;
+}
+
+/* Mobile-first responsive styles */
+@media screen and (max-width: 600px) {
+  .container {
+    padding: 0 16px;
+  }
+  
+  .MuiButton-root {
+    width: 100%;
+    margin: 8px 0;
+  }
+  
+  .MuiCard-root {
+    margin: 8px 0;
+  }
+  
+  .MuiGrid-container {
+    padding: 8px;
+  }
+}
+
+/* Tablet styles */
+@media screen and (min-width: 601px) and (max-width: 960px) {
+  .container {
+    padding: 0 24px;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Utility classes */
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.text-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Touch-friendly styles for mobile */
+@media (hover: none) {
+  .MuiButtonBase-root {
+    min-height: 48px;
+  }
+  
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Responsive images */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}

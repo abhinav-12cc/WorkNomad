@@ -7,6 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const bcrypt = require('bcryptjs');
+const { check, validationResult } = require('express-validator');
 
 // Configure multer for local file storage
 const storage = multer.diskStorage({
@@ -53,53 +54,117 @@ router.get('/profile', auth, async (req, res) => {
 });
 
 // Update user profile
-router.patch('/profile', auth, async (req, res) => {
-  const updates = Object.keys(req.body);
-  const allowedUpdates = ['name', 'email', 'phone', 'bio', 'skills', 'location'];
-  const isValidOperation = updates.every((update) => allowedUpdates.includes(update));
-
-  if (!isValidOperation) {
-    return res.status(400).json({ error: 'Invalid updates!' });
-  }
-
+router.put('/profile', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const allowedUpdates = ['occupation', 'skills', 'linkedinUrl'];
+    const updates = Object.keys(req.body)
+      .filter(key => allowedUpdates.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = req.body[key];
+        return obj;
+      }, {});
+
+    const user = await User.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    updates.forEach((update) => user[update] = req.body[update]);
+    Object.assign(user, updates);
     await user.save();
 
-    res.json(user);
+    // Remove password from response
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.json({
+      success: true,
+      data: userResponse
+    });
   } catch (error) {
     console.error('Update profile error:', error);
-    res.status(400).json({ error: error.message });
+    res.status(500).json({ error: 'Error updating profile' });
+  }
+});
+
+// Update profile picture
+router.put('/profile-picture', auth, upload.single('profilePicture'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Delete old profile picture if it exists
+    if (user.profilePicture) {
+      try {
+        const oldPicturePath = path.join(__dirname, '..', 'public', user.profilePicture);
+        await fs.unlink(oldPicturePath);
+      } catch (err) {
+        console.error('Error deleting old profile picture:', err);
+      }
+    }
+
+    // Update user's profile picture path
+    user.profilePicture = `/uploads/profile-pictures/${req.file.filename}`;
+    await user.save();
+
+    // Remove password from response
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.json({
+      success: true,
+      data: userResponse
+    });
+  } catch (error) {
+    console.error('Update profile picture error:', error);
+    res.status(500).json({ error: 'Error updating profile picture' });
   }
 });
 
 // Change password
-router.patch('/profile/password', auth, async (req, res) => {
+router.put('/change-password', [
+  auth,
+  [
+    check('currentPassword', 'Current password is required').exists(),
+    check('newPassword', 'Please enter a password with 6 or more characters').isLength({ min: 6 })
+  ]
+], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
+
     const { currentPassword, newPassword } = req.body;
-    
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user._id);
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ error: 'Current password is incorrect' });
     }
 
-    user.password = newPassword;
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
     await user.save();
 
-    res.json({ message: 'Password updated successfully' });
+    res.json({
+      success: true,
+      message: 'Password updated successfully'
+    });
   } catch (error) {
-    console.error('Password change error:', error);
-    res.status(400).json({ error: error.message });
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Error changing password' });
   }
 });
 

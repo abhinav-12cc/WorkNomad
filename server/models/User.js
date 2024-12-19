@@ -21,14 +21,32 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['freelancer', 'property-owner', 'admin'],
-    default: 'freelancer'
+    enum: ['developer', 'owner', 'admin'],
+    default: 'developer'
   },
+  // Common fields
   profilePicture: String,
-  skills: [String],
-  bio: String,
-  location: String,
   phone: String,
+  
+  // Developer specific fields
+  occupation: String,
+  skills: [String],
+  linkedinUrl: String,
+  
+  // Property owner specific fields
+  aadharNumber: String,
+  gstin: String,
+  businessName: String,
+  businessAddress: String,
+  propertyCount: {
+    type: Number,
+    default: 0
+  },
+  likesCount: {
+    type: Number,
+    default: 0
+  },
+  
   createdAt: {
     type: Date,
     default: Date.now

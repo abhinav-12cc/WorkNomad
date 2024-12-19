@@ -50,8 +50,13 @@ const PropertyCard = ({ property }) => {
   };
 
   const handleClick = () => {
-    navigate(`/property/${property._id}`);
+    navigate(`/properties/${property._id}`);
   };
+
+  // Format the location string
+  const locationString = property.location ? 
+    `${property.location.address}, ${property.location.city}, ${property.location.state}` : 
+    'Location not available';
 
   return (
     <StyledCard
@@ -92,7 +97,7 @@ const PropertyCard = ({ property }) => {
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
           <LocationOnIcon color="action" sx={{ mr: 0.5, fontSize: '1rem' }} />
           <Typography variant="body2" color="text.secondary" noWrap>
-            {property.location}
+            {locationString}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -101,14 +106,16 @@ const PropertyCard = ({ property }) => {
             ({property.reviews?.length || '12'} reviews)
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-          {property.amenities?.includes('Wi-Fi') && <WifiIcon color="action" />}
-          {property.amenities?.includes('AC') && <AcUnitIcon color="action" />}
-          {property.amenities?.includes('Parking') && <LocalParkingIcon color="action" />}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="h6" color="primary">
+            ₹{property.price}/month
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {property.amenities?.includes('wifi') && <WifiIcon color="action" />}
+            {property.amenities?.includes('ac') && <AcUnitIcon color="action" />}
+            {property.amenities?.includes('parking') && <LocalParkingIcon color="action" />}
+          </Box>
         </Box>
-        <Typography variant="h6" color="primary">
-          ₹{property.price}/day
-        </Typography>
       </CardContent>
     </StyledCard>
   );

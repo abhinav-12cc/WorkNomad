@@ -7,6 +7,7 @@ import analyticsReducer from './slices/analyticsSlice';
 import profileReducer from './slices/profileSlice';
 import ownerPropertyReducer from './slices/ownerPropertySlice';
 import availabilityReducer from './slices/availabilitySlice';
+import alertReducer from './slices/alertSlice';
 
 export const store = configureStore({
   reducer: {
@@ -18,6 +19,7 @@ export const store = configureStore({
     profile: profileReducer,
     ownerProperty: ownerPropertyReducer,
     availability: availabilityReducer,
+    alert: alertReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

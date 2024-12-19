@@ -1,30 +1,54 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import axios from 'axios';
+import api from '../../utils/api';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5003/api';
-
-// Fetch all properties
+// Action Creators
 export const fetchProperties = createAsyncThunk(
   'properties/fetchProperties',
-  async (searchParams, { rejectWithValue }) => {
+  async (filters = {}, { rejectWithValue }) => {
     try {
-      const response = await axios.get(`${BASE_URL}/properties`, { params: searchParams });
+      const response = await api.get('/api/properties', { params: filters });
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.error || 'Failed to fetch properties');
+      return rejectWithValue(error.response?.data || { error: 'Failed to fetch properties' });
     }
   }
 );
 
-// Fetch single property
 export const fetchPropertyById = createAsyncThunk(
   'properties/fetchPropertyById',
   async (id, { rejectWithValue }) => {
     try {
-      const response = await axios.get(`${BASE_URL}/properties/${id}`);
+      const response = await api.get(`/api/properties/${id}`);
+      if (response.data.success) {
+        return response.data.data;
+      }
+      return rejectWithValue(response.data);
+    } catch (error) {
+      return rejectWithValue(error.response?.data || { error: 'Failed to fetch property' });
+    }
+  }
+);
+
+export const fetchOwnerProperties = createAsyncThunk(
+  'properties/fetchOwnerProperties',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await api.get('/api/properties/owner');
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.error || 'Failed to fetch property');
+      return rejectWithValue(error.response?.data || { error: 'Failed to fetch owner properties' });
+    }
+  }
+);
+
+export const addProperty = createAsyncThunk(
+  'properties/addProperty',
+  async (propertyData, { rejectWithValue }) => {
+    try {
+      const response = await api.post('/api/properties', propertyData);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data || { error: 'Failed to add property' });
     }
   }
 );
@@ -32,61 +56,44 @@ export const fetchPropertyById = createAsyncThunk(
 const initialState = {
   properties: [],
   selectedProperty: null,
+  ownerProperties: [],
   loading: false,
   error: null,
-  filters: {
-    type: '',
-    location: '',
-    priceRange: [0, 10000],
-    amenities: [],
-  },
-  pagination: {
-    page: 1,
-    limit: 10,
-    total: 0,
-  },
+  success: false
 };
 
 const propertySlice = createSlice({
   name: 'properties',
   initialState,
   reducers: {
-    setFilters: (state, action) => {
-      state.filters = {
-        ...state.filters,
-        ...action.payload,
-      };
-      state.pagination.page = 1; // Reset to first page when filters change
+    clearError: (state) => {
+      state.error = null;
     },
-    setPage: (state, action) => {
-      state.pagination.page = action.payload;
-    },
-    clearFilters: (state) => {
-      state.filters = initialState.filters;
-      state.pagination.page = 1;
-    },
+    setSelectedProperty: (state, action) => {
+      state.selectedProperty = action.payload;
+    }
   },
   extraReducers: (builder) => {
     builder
-      // Fetch properties cases
+      // Fetch Properties
       .addCase(fetchProperties.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
       .addCase(fetchProperties.fulfilled, (state, action) => {
         state.loading = false;
-        state.properties = action.payload.properties;
-        state.pagination.total = action.payload.total;
+        state.properties = action.payload.properties || [];
       })
       .addCase(fetchProperties.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload;
-        state.properties = [];
+        state.error = action.payload?.error || 'Failed to fetch properties';
       })
-      // Fetch single property cases
+
+      // Fetch Property By ID
       .addCase(fetchPropertyById.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.selectedProperty = null;
       })
       .addCase(fetchPropertyById.fulfilled, (state, action) => {
         state.loading = false;
@@ -94,11 +101,42 @@ const propertySlice = createSlice({
       })
       .addCase(fetchPropertyById.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload;
-        state.selectedProperty = null;
+        state.error = action.payload?.error || 'Failed to fetch property';
+      })
+
+      // Fetch Owner Properties
+      .addCase(fetchOwnerProperties.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchOwnerProperties.fulfilled, (state, action) => {
+        state.loading = false;
+        state.ownerProperties = action.payload;
+      })
+      .addCase(fetchOwnerProperties.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload?.error || 'Failed to fetch owner properties';
+      })
+
+      // Add Property
+      .addCase(addProperty.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+        state.success = false;
+      })
+      .addCase(addProperty.fulfilled, (state, action) => {
+        state.loading = false;
+        state.success = true;
+        state.properties.unshift(action.payload);
+        state.ownerProperties.unshift(action.payload);
+      })
+      .addCase(addProperty.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload?.error || 'Failed to add property';
+        state.success = false;
       });
-  },
+  }
 });
 
-export const { setFilters, setPage, clearFilters } = propertySlice.actions;
+export const { clearError, setSelectedProperty } = propertySlice.actions;
 export default propertySlice.reducer;

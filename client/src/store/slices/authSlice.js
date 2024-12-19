@@ -1,16 +1,19 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from 'axios';
+import api from '../../utils/api';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5003/api';
+const BASE_URL = 'http://localhost:5003/api';
 
 // Helper function to set auth token
 const setAuthToken = (token) => {
   if (token) {
     localStorage.setItem('token', token);
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   } else {
     localStorage.removeItem('token');
     delete axios.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common['Authorization'];
   }
 };
 
@@ -19,15 +22,27 @@ const clearAuthData = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   delete axios.defaults.headers.common['Authorization'];
+  delete api.defaults.headers.common['Authorization'];
+};
+
+// Load token on app start
+const loadToken = () => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    setAuthToken(token);
+    return token;
+  }
+  return null;
 };
 
 // Initial state
 const initialState = {
-  token: null,
-  isAuthenticated: false,
-  user: null,
+  token: loadToken(),
+  isAuthenticated: !!loadToken(),
+  user: JSON.parse(localStorage.getItem('user')) || null,
   loading: false,
-  error: null
+  error: null,
+  success: false
 };
 
 // Register user
@@ -38,6 +53,7 @@ export const register = createAsyncThunk(
       const response = await axios.post(`${BASE_URL}/users/register`, userData);
       if (response.data.token) {
         setAuthToken(response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
       }
       return response.data;
     } catch (error) {
@@ -55,6 +71,7 @@ export const login = createAsyncThunk(
       const response = await axios.post(`${BASE_URL}/users/login`, credentials);
       if (response.data.token) {
         setAuthToken(response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
       }
       return response.data;
     } catch (error) {
@@ -64,44 +81,70 @@ export const login = createAsyncThunk(
   }
 );
 
-// Load user
-export const loadUser = createAsyncThunk(
-  'auth/loadUser',
+// Get user profile
+export const getUserProfile = createAsyncThunk(
+  'auth/getUserProfile',
   async (_, { rejectWithValue }) => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No token found');
-      }
-      
-      const response = await axios.get(`${BASE_URL}/users/profile`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const response = await api.get(`${BASE_URL}/users/profile`);
+      localStorage.setItem('user', JSON.stringify(response.data));
       return response.data;
     } catch (error) {
-      clearAuthData();
-      return rejectWithValue(error.response?.data?.error || 'Failed to load user');
+      if (error.response?.status === 401) {
+        clearAuthData();
+      }
+      return rejectWithValue(error.response?.data?.error || 'Failed to get user profile');
     }
   }
 );
 
-// Initialize auth
-export const initializeAuth = createAsyncThunk(
-  'auth/initialize',
-  async (_, { dispatch }) => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      clearAuthData();
-      return null;
-    }
-    
+// Update user profile
+export const updateProfile = createAsyncThunk(
+  'auth/updateProfile',
+  async (profileData, { rejectWithValue }) => {
     try {
-      await dispatch(loadUser()).unwrap();
+      const token = localStorage.getItem('token');
+      if (!token) {
+        return rejectWithValue('No authentication token found');
+      }
+
+      const response = await api.put('/api/users/profile', profileData);
+      return response.data.data;
     } catch (error) {
-      clearAuthData();
-      throw error;
+      console.error('Profile update error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.error || 'Failed to update profile');
+    }
+  }
+);
+
+// Update profile picture
+export const updateProfilePicture = createAsyncThunk(
+  'auth/updateProfilePicture',
+  async (formData, { rejectWithValue }) => {
+    try {
+      const response = await api.put('/api/users/profile-picture', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data.data;
+    } catch (error) {
+      console.error('Profile picture update error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.error || 'Failed to update profile picture');
+    }
+  }
+);
+
+// Change password
+export const changePassword = createAsyncThunk(
+  'auth/changePassword',
+  async (passwordData, { rejectWithValue }) => {
+    try {
+      const response = await api.put('/api/users/change-password', passwordData);
+      return response.data;
+    } catch (error) {
+      console.error('Password change error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data?.error || 'Failed to change password');
     }
   }
 );
@@ -110,35 +153,22 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    logout: (state) => {
-      clearAuthData();
+    logout(state) {
       state.token = null;
       state.isAuthenticated = false;
       state.user = null;
       state.loading = false;
       state.error = null;
+      state.success = false;
+      clearAuthData();
     },
-    clearError: (state) => {
+    clearError(state) {
       state.error = null;
-    }
+    },
   },
   extraReducers: (builder) => {
     builder
-      // Initialize auth
-      .addCase(initializeAuth.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(initializeAuth.fulfilled, (state) => {
-        state.loading = false;
-      })
-      .addCase(initializeAuth.rejected, (state) => {
-        state.loading = false;
-        state.token = null;
-        state.isAuthenticated = false;
-        state.user = null;
-      })
-      // Register cases
+      // Register
       .addCase(register.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -146,17 +176,14 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, (state, action) => {
         state.loading = false;
         state.isAuthenticated = true;
-        state.user = action.payload.user;
         state.token = action.payload.token;
+        state.user = action.payload.user;
       })
       .addCase(register.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
-        state.isAuthenticated = false;
-        state.token = null;
-        state.user = null;
       })
-      // Login cases
+      // Login
       .addCase(login.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -164,34 +191,72 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
         state.isAuthenticated = true;
-        state.user = action.payload.user;
         state.token = action.payload.token;
+        state.user = action.payload.user;
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
-        state.isAuthenticated = false;
-        state.token = null;
-        state.user = null;
       })
-      // Load user cases
-      .addCase(loadUser.pending, (state) => {
+      // Get User Profile
+      .addCase(getUserProfile.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(loadUser.fulfilled, (state, action) => {
+      .addCase(getUserProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.isAuthenticated = true;
         state.user = action.payload;
       })
-      .addCase(loadUser.rejected, (state, action) => {
+      .addCase(getUserProfile.rejected, (state, action) => {
         state.loading = false;
-        state.isAuthenticated = false;
-        state.user = null;
-        state.token = null;
+        state.error = action.payload;
+      })
+      // Update Profile
+      .addCase(updateProfile.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+        state.success = false;
+      })
+      .addCase(updateProfile.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload;
+        state.success = true;
+      })
+      .addCase(updateProfile.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+        state.success = false;
+      })
+      // Update Profile Picture
+      .addCase(updateProfilePicture.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+        state.success = false;
+      })
+      .addCase(updateProfilePicture.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload;
+        state.success = true;
+      })
+      .addCase(updateProfilePicture.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+        state.success = false;
+      })
+      // Change Password
+      .addCase(changePassword.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(changePassword.fulfilled, (state) => {
+        state.loading = false;
+        state.success = true;
+      })
+      .addCase(changePassword.rejected, (state, action) => {
+        state.loading = false;
         state.error = action.payload;
       });
-  }
+  },
 });
 
 export const { logout, clearError } = authSlice.actions;
