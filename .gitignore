@@ -70,6 +70,3 @@ client/public/vite.svg
 # Windows system files
 Desktop.ini
 $RECYCLE.BIN/
-
-# Cloudinary config (if moved to .env)
-server/src/config/cloudinary.js 
